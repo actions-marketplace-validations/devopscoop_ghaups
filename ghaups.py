@@ -118,16 +118,48 @@ def set_cached_version(owner: str, repo: str, version: str, sha: str) -> None:
 
 
 def get_sha_for_tag(owner: str, repo: str, tag: str) -> Optional[str]:
-    """Get the SHA for a specific tag, trying both git ref endpoints."""
+    """Get the commit SHA for a specific tag, trying both git ref endpoints.
+
+    An annotated tag's ref points at a tag object, not a commit. GitHub Actions
+    cannot resolve a tag-object SHA in a ``uses:`` line, so peel annotated
+    (possibly nested) tags until the ref resolves to a commit.
+    """
+    api = f"https://api.github.com/repos/{owner}/{repo}"
     try:
         for path in ('git/ref/tags', 'git/refs/tags'):
-            url = f"https://api.github.com/repos/{owner}/{repo}/{path}/{tag}"
-            response = requests.get(url, timeout=10)
-            if response.status_code == 200:
-                sha = response.json().get('object', {}).get('sha')
-                if sha:
-                    logger.debug(f"{owner}/{repo}: found {tag} @ {sha[:12]}")
-                    return sha
+            response = requests.get(f"{api}/{path}/{tag}", timeout=10)
+            if response.status_code != 200:
+                continue
+            obj = response.json().get('object', {})
+            sha, obj_type = obj.get('sha'), obj.get('type')
+            if not sha:
+                continue
+
+            while obj_type == 'tag':
+                logger.debug(
+                    f"{owner}/{repo}: {tag} is an annotated tag "
+                    f"({sha[:12]}), resolving to commit"
+                )
+                response = requests.get(f"{api}/git/tags/{sha}", timeout=10)
+                if response.status_code != 200:
+                    logger.warning(
+                        f"Failed to resolve annotated tag {owner}/{repo}@{tag} "
+                        f"({sha[:12]}): HTTP {response.status_code}"
+                    )
+                    return None
+                obj = response.json().get('object', {})
+                sha, obj_type = obj.get('sha'), obj.get('type')
+                if not sha:
+                    return None
+
+            if obj_type != 'commit':
+                logger.warning(
+                    f"{owner}/{repo}@{tag} points at a {obj_type}, not a commit"
+                )
+                return None
+
+            logger.debug(f"{owner}/{repo}: found {tag} @ {sha[:12]}")
+            return sha
         return None
     except Exception as e:
         logger.warning(f"Failed to fetch {owner}/{repo} tag {tag}: {e}")

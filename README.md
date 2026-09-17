@@ -6,7 +6,7 @@ The tool:
 
 1. Scans each provided workflow file for GitHub Actions (e.g., `actions/checkout@v3.0.0`).
 2. Checks the latest version by following the GitHub releases/latest redirect.
-3. Fetches the SHA commit hash for that version via GitHub API.
+3. Fetches the commit SHA for that version via GitHub API. Annotated tags are peeled to the commit they point at, since `uses:` cannot reference a tag object.
 4. Updates the workflow file with the SHA and version comment (e.g., `actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0`).
 5. Scans each action repository for HIGH/CRITICAL vulnerabilities using Trivy.
 6. Reports what was updated and any security issues found.
